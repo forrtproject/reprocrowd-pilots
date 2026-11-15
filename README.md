@@ -33,7 +33,7 @@ Every run's `licenses.json` lists the licence of each file. Our licences cover o
 
 You need write access to this repository, because submissions create issues with labels and releases. To ask for access, open an issue with the access template. Alternatively, point the app at a repository of your own.
 
-1. Log in to GitHub once with the [GitHub CLI](https://cli.github.com): run `gh auth login` in a terminal, choose GitHub.com and log in with your browser. ReproCrowd uses that login. (Instead, you can paste a [fine-grained token](https://github.com/settings/personal-access-tokens/new) for this repository with **Contents: Read and write** and **Issues: Read and write** in **Settings → GitHub pilots**.)
+1. Log in to GitHub once with the [GitHub CLI](https://cli.github.com): run `gh auth login` in a terminal, choose GitHub.com and log in with your browser. ReproCrowd uses that login. In **Settings → GitHub pilots**, **Log in with gh** starts it for you.
 2. In **Settings → GitHub pilots**, click **Check**. It should say that your account can submit.
 3. In the ReproCrowd app, finish the report and create the ZIP (step 8).
 4. In step 8, click **Submit this run as a GitHub pilot**.
