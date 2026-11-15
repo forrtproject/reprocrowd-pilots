@@ -24,7 +24,7 @@ Issues labelled `synthetic` are test fixtures of the publication workflow, not r
 |---|---|
 | Metadata: `datapackage.json`, targets, plan, `pilot.json`, `licenses.json` | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
 | Newly authored reports, comparisons, execution evidence, figures and analysis outputs | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
-| Newly authored analysis code (the master script and other new code) | Stated per run in `licenses.json` (default policy under review) |
+| Newly authored analysis code (the master script and other new code) | [MIT](https://opensource.org/license/mit) (each run's `licenses.json` states it) |
 | The article's text, extractions and original figures; the input data and code | Not relicensed: they keep their original licences |
 
 Every run's `licenses.json` lists the licence of each file. Our licences cover only our own contribution. Passages of the article quoted in our files (targets, plan, report) remain under the article's terms. Outputs computed from third-party data are also subject to that data's terms. By default the article's own material is left out of the ZIP unless OpenAlex reports an open licence for it; `excluded-files.json` lists what was left out, with hashes. This repository's own text (this README, the templates) is CC BY 4.0.
@@ -33,15 +33,15 @@ Every run's `licenses.json` lists the licence of each file. Our licences cover o
 
 You need write access to this repository, because submissions create issues with labels and releases. To ask for access, open an issue with the access template. Alternatively, point the app at a repository of your own.
 
-1. In the ReproCrowd app, finish the report and create the ZIP (step 8).
-2. Create a [fine-grained token](https://github.com/settings/personal-access-tokens/new) for `forrtproject/reprocrowd-pilots` only, with **Contents: Read and write** and **Issues: Read and write**.
-3. In **Settings → GitHub pilots**, paste the token and click **Check**.
+1. Log in to GitHub once with the [GitHub CLI](https://cli.github.com): run `gh auth login` in a terminal, choose GitHub.com and log in with your browser. ReproCrowd uses that login. (Instead, you can paste a [fine-grained token](https://github.com/settings/personal-access-tokens/new) for this repository with **Contents: Read and write** and **Issues: Read and write** in **Settings → GitHub pilots**.)
+2. In **Settings → GitHub pilots**, click **Check**. It should say that your account can submit.
+3. In the ReproCrowd app, finish the report and create the ZIP (step 8).
 4. In step 8, click **Submit this run as a GitHub pilot**.
 
 From the command line, the same service does the same thing:
 
 ```sh
-gh auth login                           # or: export REPROCROWD_GITHUB_TOKEN=…
+gh auth login                           # once; or: export REPROCROWD_GITHUB_TOKEN=…
 uv run --project backend rc pilot check
 uv run --project backend rc pilot preview <package-id>
 uv run --project backend rc pilot submit <package-id>
