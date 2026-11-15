@@ -7,13 +7,13 @@ Public, **unreviewed** records of computational reproductions made with the [Rep
 
 ## How a record is organised
 
-- **One issue per reproduction.** The issue has the labels `reprocrowd-pilot` and `unreviewed`. Its description shows the latest run and a table of all runs. Independent reproductions of the same paper get separate issues; the paper's DOI is metadata, not the record's identity.
-- **One pre-release per run.** Each run is tagged `<reproduction-id>-<run-key>` and holds:
+- **One issue per reproduction.** The issue has the labels `reprocrowd-pilot` and `unreviewed` once its first run is copied. Its description shows the latest run and a table of all runs. Independent reproductions of the same paper get separate issues; the paper's DOI is metadata, not the record's identity.
+- **One pre-release per run.** Each run is tagged `<reproduction-id>-<run-key>`. The app publishes it in the submitter's fork of this repository; this repository's Action (`.github/workflows/pilot-copy.yml`) checks it and copies it here. The copy holds:
   - the package ZIP, a Frictionless data package;
   - `report.html`, `comparison.json`, `execution.json` and `licenses.json`, copied out of that ZIP;
   - `pilot.json`, a machine-readable summary with the SHA-256 hash of every file.
 - **One comment per run** on the issue, with the summary, the comparison and links to the files with their hashes.
-- **Runs are numbered v1, v2, …** Later runs are added as new versions. Published releases are immutable on this repository, so earlier runs stay exactly as they were.
+- **Runs are numbered v1, v2, …** by the Action when it copies them. Later runs are added as new versions. Published releases are immutable on this repository, so earlier runs stay exactly as they were.
 - **The run key is computed from the archive's hash** (and which file groups were left out). Submitting the same archive again changes nothing: the app finds the existing issue, release and comment and creates no duplicates. If an upload fails partway, submitting again resumes it.
 
 Issues labelled `synthetic` are test fixtures of the publication workflow, not research results.
@@ -31,17 +31,19 @@ Every run's `licenses.json` lists the licence of each file. Our licences cover o
 
 ## Submitting a run
 
-You need write access to this repository, because submissions create issues with labels and releases. To ask for access, open an issue with the access template. Alternatively, point the app at a repository of your own.
+Anyone with a GitHub account can submit; you don't need access to this repository. On your first submission the app forks this repository into your account and publishes each run's files as a release there. It opens the reproduction's issue here and posts a comment for the run. This repository's Action then copies the files into its own release and replies on the issue.
+
+The Action copies a run only if the comment is by the issue's author (or a maintainer), the files come from the commenter's own fork, the reproduction ID isn't claimed by an earlier issue, the run's files total under 200 MB, and every file matches its SHA-256 in `pilot.json` and GitHub's digest. Otherwise it replies with the reason and copies nothing. Maintainers can rerun it for an issue under **Actions → Copy pilot runs → Run workflow**.
 
 1. Log in to GitHub once with the [GitHub CLI](https://cli.github.com): run `gh auth login` in a terminal, choose GitHub.com and log in with your browser. ReproCrowd uses that login. In **Settings → GitHub pilots**, **Log in with gh** starts it for you.
-2. In **Settings → GitHub pilots**, click **Check**. It should say that your account can submit.
+2. In **Settings → GitHub pilots**, click **Check**. It should say that your account can submit and where your files go.
 3. In the ReproCrowd app, finish the report and create the ZIP (step 8).
 4. In step 8, click **Submit this run as a GitHub pilot**.
 
 From the command line, the same service does the same thing:
 
 ```sh
-gh auth login                           # once; or: export REPROCROWD_GITHUB_TOKEN=…
+gh auth login                           # once; or a classic token with public_repo: export REPROCROWD_GITHUB_TOKEN=…
 uv run --project backend rc pilot check
 uv run --project backend rc pilot preview <package-id>
 uv run --project backend rc pilot submit <package-id>

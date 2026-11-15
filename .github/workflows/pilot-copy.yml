@@ -1,0 +1,33 @@
+# Copies each submitted pilot run into an immutable pre-release of this repository (see .github/scripts/pilot_copy.py).
+# The comment and issue are read from the event file, never interpolated into the shell.
+name: Copy pilot runs
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Issue number whose run comments to process again
+        required: true
+permissions:
+  contents: write
+  issues: write
+concurrency:
+  group: pilot-copy-${{ github.event.issue.number || inputs.issue }}
+  cancel-in-progress: false
+jobs:
+  copy:
+    if: github.event_name == 'workflow_dispatch' || (!github.event.issue.pull_request && contains(github.event.comment.body, '<!-- reprocrowd-pilot-run:'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --quiet httpx==0.28.1
+      - run: python .github/scripts/pilot_copy.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
