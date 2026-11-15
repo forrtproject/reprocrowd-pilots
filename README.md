@@ -33,7 +33,7 @@ Every run's `licenses.json` lists the licence of each file. Our licences cover o
 
 Anyone with a GitHub account can submit; you don't need access to this repository. On your first submission the app forks this repository into your account and publishes each run's files as a release there. It opens the reproduction's issue here and posts a comment for the run. This repository's Action then copies the files into its own release and replies on the issue.
 
-The Action copies a run only if the comment is by the issue's author (or a maintainer), the files come from the commenter's own fork, the reproduction ID isn't claimed by an earlier issue, the run's files total under 200 MB, and every file matches its SHA-256 in `pilot.json` and GitHub's digest. Otherwise it replies with the reason and copies nothing. Maintainers can rerun it for an issue under **Actions → Copy pilot runs → Run workflow**.
+The Action copies a run only if the comment is by the issue's author (or a maintainer), the files come from the commenter's own fork, no other issue holds a copied run of the reproduction, the run's files total at most 200 MiB, and every file matches its SHA-256 in `pilot.json` and GitHub's digest. Otherwise it replies with the reason and copies nothing. Maintainers can rerun it for an issue under **Actions → Copy pilot runs → Run workflow**.
 
 1. Log in to GitHub once with the [GitHub CLI](https://cli.github.com): run `gh auth login` in a terminal, choose GitHub.com and log in with your browser. ReproCrowd uses that login. In **Settings → GitHub pilots**, **Log in with gh** starts it for you.
 2. In **Settings → GitHub pilots**, click **Check**. It should say that your account can submit and where your files go.
