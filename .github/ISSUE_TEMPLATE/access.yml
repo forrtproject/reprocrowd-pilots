@@ -1,0 +1,14 @@
+name: Request access to submit pilots
+description: Ask for write access so the ReproCrowd app can create pilot records here.
+labels: ["access-request"]
+body:
+  - type: markdown
+    attributes:
+      value: Pilot records are created by the ReproCrowd app, not by hand. Submitting needs write access, because the app creates issues with labels and releases.
+  - type: textarea
+    id: who
+    attributes:
+      label: Who you are and what you plan to reproduce
+      description: Your name, affiliation or ORCID, and the papers (DOIs) you plan to reproduce.
+    validations:
+      required: true

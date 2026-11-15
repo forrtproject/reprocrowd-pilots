@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a problem with the ReproCrowd app
+    url: https://github.com/forrtproject/reprocrowd-app/issues
+    about: Pilot records are created by the app; bugs and feature requests go to the app's repository.
