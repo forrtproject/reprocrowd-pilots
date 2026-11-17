@@ -13,8 +13,8 @@ Before anything is copied:
 - the reproduction ID and run key agree in the issue, the comment, the tag and pilot.json;
 - the run is under MAX_RUN bytes, checked before downloading;
 - every file is listed in pilot.json and matches its SHA-256 there and GitHub's digest; the ZIP is readable and holds
-  datapackage.json and licenses.json.
-A refused run gets one reply with the reason; nothing is copied.
+  datapackage.json, comparison.json and licenses.json, and licenses.json follows the licence policy for every file.
+A refused run gets one reply with the reason; nothing is copied. Only this Action's own replies mark a run as answered.
 
 Source: backend/src/reprocrowd/pilot_copy.py in forrtproject/reprocrowd-app, where it is tested. The pilots repository
 runs a copy as .github/scripts/pilot_copy.py. Needs Python 3.10+ and httpx; imports nothing else from ReproCrowd.
@@ -27,7 +27,7 @@ import json
 import os
 import re
 import zipfile
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 import httpx
 
@@ -39,7 +39,8 @@ FILES_RE = re.compile(r"<!-- reprocrowd-pilot-files:([A-Za-z0-9-]+/[A-Za-z0-9_.-
 SUMMARY_RE = re.compile(r"<!-- reprocrowd-summary: (\{.*?\}) -->")
 ISSUE_OF_RE = re.compile(r"<!-- reprocrowd-pilot-issue:(\d+) -->")  # in each copied release: the issue that owns the reproduction
 RUNS_START, RUNS_END = "<!-- reprocrowd-runs -->", "<!-- /reprocrowd-runs -->"
-DOI_RE = re.compile(r"^10\.\d{4,9}/[^\s<>\[\]()`|]+$")
+DOI_CHAR = r"[^\s<>\[\]()`|]"  # what pilot.json and the links accept in a DOI
+DOI_RE = re.compile(rf"^10\.\d{{4,9}}/{DOI_CHAR}+$")
 POLICY_RE = re.compile(r"^reprocrowd-compare/\d+$")
 CODE_LICENCES = {"MIT", "CC-BY-4.0"}
 MAX_JSON = 20 * 1024**2  # comparison.json and licenses.json are read from the ZIP only up to this size
@@ -48,9 +49,29 @@ DISCLAIMER = ("**Pilot record — unreviewed.** Made with ReproCrowd by recreati
               "reported numbers from these inputs. It is not peer review, a certificate of the study's validity, or an endorsement. The authors' "
               "code was left out of the agent's context; that is not verified blinding.")
 MAINTAINERS = ("OWNER", "MEMBER", "COLLABORATOR")
+ACTION_LOGIN = "github-actions[bot]"  # the Action comments as this account; replies by anyone else are ignored
+THIRD_PARTY_KINDS = {"fulltext", "extraction", "figure", "input"}  # reprocrowd-licensing/1: not relicensed; every other kind is ours
+GENERATED = {"datapackage.json": "manifest", "licenses.json": "export", "report.html": "report", "comparison.json": "report",
+             "evidence/execution.json": "report"}  # files the app writes itself: their kind (so their licence) is fixed
 LABELS = {"reprocrowd-pilot": ("1d76db", "A ReproCrowd pilot record (one issue per reproduction)"),
           "unreviewed": ("fbca04", "Not reviewed: a numeric match is not a scientific certificate"),
           "synthetic": ("cccccc", "Synthetic test fixture of the publication workflow, not research")}
+
+
+def doi_tag(doi: str) -> str:
+    """How a pilot issue's title names its paper."""
+    return f"(doi:{doi})"
+
+
+def doi_url(doi: str) -> str:
+    """How pilot issues and releases link their paper."""
+    return f"https://doi.org/{doi}"
+
+
+def names_paper(title: str, body: str, doi: str) -> bool:
+    """Whether a pilot issue is about the paper with this (lower-case) DOI: its title carries doi_tag, or, as titles are
+    cut at 240 characters, its description links doi_url (not followed by more DOI characters)."""
+    return doi_tag(doi) in title.lower() or re.search(re.escape(doi_url(doi)) + rf"(?!{DOI_CHAR})", body, re.I) is not None
 
 
 def issue_mark(rid: str) -> str:
@@ -90,18 +111,26 @@ class Refused(Exception):
     """The run is not copied; the message is the reply."""
 
 
+class GitHubError(RuntimeError):
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
+
+
 class Api:
-    def __init__(self, token: str, api: str = "https://api.github.com"):
-        self.api = api.rstrip("/")
-        self.headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-                        "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "reprocrowd-pilot-copy"}
+    def __init__(self, token: str | None, api: str = "https://api.github.com", agent: str = "reprocrowd-pilot-copy", timeout: float = 120):
+        """Without a token, for public reads only. ``timeout`` (seconds) applies to each request unless it passes its own."""
+        self.api, self.timeout = api.rstrip("/"), timeout
+        self.headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": agent}
+        if token:
+            self.headers["Authorization"] = f"Bearer {token}"
 
     def request(self, method: str, url: str, ok: tuple[int, ...] = (200, 201, 204), **kw) -> httpx.Response:
         url = url if url.startswith("http") else self.api + url
-        r = httpx.request(method, url, headers={**self.headers, **kw.pop("headers", {})}, timeout=kw.pop("timeout", 120),
+        r = httpx.request(method, url, headers={**self.headers, **kw.pop("headers", {})}, timeout=kw.pop("timeout", self.timeout),
                           follow_redirects=True, **kw)
         if r.status_code not in ok:
-            raise RuntimeError(f"GitHub returned HTTP {r.status_code} for {method} {url.split('?')[0]}: {r.text[:300]}")
+            raise GitHubError(r.status_code, f"GitHub returned HTTP {r.status_code} for {method} {url.split('?')[0]}: {r.text[:300]}")
         return r
 
     def json(self, method: str, url: str, **kw) -> Any:
@@ -123,7 +152,9 @@ def handle(api: Api, repo: str, issue: dict[str, Any], comment: dict[str, Any]) 
         return None
     rid, key = m.groups()
     tag = f"{rid}-{key}"
-    replies = [c.get("body") or "" for c in api.paged(f"/repos/{repo}/issues/{issue['number']}/comments")]
+    # only the Action's own replies count: anyone can paste a reply's marker into a comment
+    replies = [c.get("body") or "" for c in api.paged(f"/repos/{repo}/issues/{issue['number']}/comments")
+               if (c.get("user") or {}).get("login") == ACTION_LOGIN]
     if any(_reply_mark(tag, "copied") in b for b in replies):
         return None
     try:
@@ -147,8 +178,8 @@ def _copy(api: Api, repo: str, issue: dict[str, Any], comment: dict[str, Any], r
     if author.lower() != issue["user"]["login"].lower() and not maintainer:
         raise Refused(f"only the issue's author or a maintainer can add runs to it; submit your own reproduction as a new issue")
     ours = [r for r in api.paged(f"/repos/{repo}/releases") if (r.get("tag_name") or "").startswith(rid + "-")]
-    # the issue of the reproduction's first copied run owns it (issue bodies can be edited by their authors; releases can't)
-    owner = next((int(m.group(1)) for r in ours if not r.get("draft") and (m := ISSUE_OF_RE.search(r.get("body") or ""))), None)
+    # issue bodies can be edited by their authors; releases can't
+    owner = owner_issue(ours, rid)
     if owner is not None and owner != issue["number"]:
         raise Refused(f"reproduction `{rid}` belongs to #{owner}")
     fm = FILES_RE.search(comment["body"])
@@ -158,7 +189,7 @@ def _copy(api: Api, repo: str, issue: dict[str, Any], comment: dict[str, Any], r
         raise Refused("the files must be in a release of the commenter's own repository")
     central = next((r for r in ours if r["tag_name"] == tag), None)
     if central and not central.get("draft"):  # copied before, but a later step or the reply failed: finish them
-        pilot = json.loads(_download(api, repo, _named(central, "pilot.json")))
+        pilot = _pilot(_download(api, repo, _named(central, "pilot.json")))
         _check_assets(central, pilot)
         _label(api, repo, issue["number"], pilot)
         _update_runs(api, repo, issue["number"], rid)
@@ -176,7 +207,7 @@ def _copy(api: Api, repo: str, issue: dict[str, Any], comment: dict[str, Any], r
     total = sum(a.get("size") or 0 for a in assets)
     if total > MAX_RUN:
         raise Refused(f"the run's files total {total:,} bytes; the limit is {MAX_RUN:,}")
-    pilot = json.loads(_download(api, src_repo, _named(source, "pilot.json")))
+    pilot = _pilot(_download(api, src_repo, _named(source, "pilot.json")))
     if (pilot.get("reproduction_id"), pilot.get("run_key"), pilot.get("tag")) != (rid, key, tag):
         raise Refused("`pilot.json` names a different reproduction or run")
     _validate(pilot)
@@ -219,6 +250,18 @@ def _named(release: dict[str, Any], name: str) -> dict[str, Any]:
 
 def _download(api: Api, repo: str, asset: dict[str, Any]) -> bytes:
     return api.request("GET", f"/repos/{repo}/releases/assets/{asset['id']}", headers={"Accept": "application/octet-stream"}).content
+
+
+def _pilot(raw: bytes) -> dict[str, Any]:
+    """pilot.json, refused unless it is an object whose assets map file names to digests."""
+    try:
+        pilot = json.loads(raw)
+    except ValueError:
+        raise Refused("`pilot.json` isn't valid JSON")
+    assets = pilot.get("assets") if isinstance(pilot, dict) else None
+    if not isinstance(assets, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in assets.items()):
+        raise Refused("`pilot.json` must be a JSON object whose `assets` map file names to SHA-256 digests")
+    return pilot
 
 
 def _check_assets(release: dict[str, Any], pilot: dict[str, Any], data: dict[str, bytes] | None = None) -> None:
@@ -289,8 +332,15 @@ def _version(release: dict[str, Any]) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def _policy_licence(f: dict[str, Any], code: list[str]) -> str | None:
-    """The licence policy reprocrowd-licensing/1 gives this entry (any listed code licence for code)."""
+_WRONG = object()  # no licence value equals it
+
+
+def _policy_licence(f: dict[str, Any], code: list[str]) -> object:
+    """The licence policy reprocrowd-licensing/1 gives this entry (any listed code licence for code), or _WRONG if the
+    entry's kind or rights contradict the policy (third-party rights only for the article's material and inputs)."""
+    kind = f.get("kind")
+    if not isinstance(kind, str) or GENERATED.get(str(f.get("path")), kind) != kind or f.get("rights") != ("third-party" if kind in THIRD_PARTY_KINDS else "ours"):
+        return _WRONG
     if f.get("rights") != "ours":
         return None
     if f.get("kind") in ("script", "code"):
@@ -303,7 +353,7 @@ def _release_body(pilot: dict[str, Any], s: dict[str, Any], code: str, author: s
     rows = "\n".join(f"| `{n}` | {size} | `{sha}` |" for n, size, sha in files)
     return (f"{synthetic}> [!WARNING]\n> {DISCLAIMER}\n\n"
             f"**Run v{s['version']}** of reproduction `{pilot['reproduction_id']}` (run key `{pilot['run_key']}`) of "
-            f"https://doi.org/{pilot['paper']['doi']}, submitted by [{author}](https://github.com/{author}) in #{issue}.\n\n"
+            f"{doi_url(pilot['paper']['doi'])}, submitted by [{author}](https://github.com/{author}) in #{issue}.\n\n"
             f"{summary_line(s)}. Policy `{s['policy']}`.\n\n| File | Bytes | SHA-256 |\n|---|---:|---|\n{rows}\n\n"
             f"Licences (policy `reprocrowd-licensing/1`, each file listed in `licenses.json`): metadata and `pilot.json` CC0-1.0; "
             f"report, comparison, evidence and outputs CC-BY-4.0; new analysis code {code}. The article's material and the input "
@@ -320,15 +370,35 @@ def _label(api: Api, repo: str, number: int, pilot: dict[str, Any]) -> None:
     api.request("POST", f"/repos/{repo}/issues/{number}/labels", json={"labels": names})
 
 
-def _update_runs(api: Api, repo: str, number: int, rid: str) -> None:
+def copied_runs(releases: Iterable[dict[str, Any]], rid: str) -> list[dict[str, Any]]:
+    """A reproduction's runs copied into the pilots repository, newest first, read from its releases: issue bodies can be
+    edited by their authors, releases can't. Each run: its summary, version, tag, url, date and the issue it was copied
+    for (release_issue)."""
     runs = []
-    for r in api.paged(f"/repos/{repo}/releases"):
-        m = SUMMARY_RE.search(r.get("body") or "")
+    for r in releases:
+        body = r.get("body") or ""
+        m = SUMMARY_RE.search(body)
         if r.get("draft") or not (r.get("tag_name") or "").startswith(rid + "-") or not m or _version(r) is None:
             continue
         runs.append({**json.loads(m.group(1)), "version": _version(r), "tag": r["tag_name"], "url": r["html_url"],
-                     "date": (r.get("published_at") or "")[:10]})
-    runs.sort(key=lambda r: -r["version"])
+                     "date": (r.get("published_at") or "")[:10], "issue": release_issue(r)})
+    return sorted(runs, key=lambda r: -r["version"])
+
+
+def release_issue(release: dict[str, Any]) -> int | None:
+    """The issue a copied (published) release of the pilots repository was made for."""
+    m = ISSUE_OF_RE.search(release.get("body") or "")
+    return int(m.group(1)) if m and not release.get("draft") else None
+
+
+def owner_issue(releases: Iterable[dict[str, Any]], rid: str) -> int | None:
+    """The issue that owns a reproduction: the one its copied releases name. Any published release of the reproduction
+    that names an issue counts, with or without a summary (the Action refuses runs for any other issue)."""
+    return next((n for r in releases if (r.get("tag_name") or "").startswith(rid + "-") and (n := release_issue(r)) is not None), None)
+
+
+def _update_runs(api: Api, repo: str, number: int, rid: str) -> None:
+    runs = copied_runs(api.paged(f"/repos/{repo}/releases"), rid)
     lines = [RUNS_START]
     if runs:
         latest = runs[0]
